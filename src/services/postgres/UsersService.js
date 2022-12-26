@@ -1,4 +1,5 @@
 const { Pool } = require('pg');
+const { queryMYSQL } = require('./../../connection/connection')
 const bcrypt = require('bcrypt');
 const uuid = require('uuid-random');
 const AuthenticationError = require('../../exceptions/AuthenticationError');
@@ -13,16 +14,16 @@ class UsersService {
 
   async verifyUserCredential(email, password) {
     const query = {
-      text: 'SELECT id, company_id, password FROM users WHERE email = $1',
+      text: 'SELECT id, company_id, password FROM users WHERE email = ?',
       values: [email],
     };
-    const result = await this._pool.query(query);
+    const result = await queryMYSQL(query);
 
-    if (!result.rows.length) {
+    if (!result.length) {
       throw new AuthenticationError('Kredensial yang Anda berikan salah');
     }
 
-    const { id, company_id: companyId, password: hashedPassword } = result.rows[0];
+    const { id, company_id: companyId, password: hashedPassword } = result[0];
 
     const match = await bcrypt.compare(password, hashedPassword);
 
@@ -34,11 +35,11 @@ class UsersService {
 
   async verifyNewEmail({ email }) {
     const query = {
-      text: 'SELECT id FROM users WHERE email = $1',
+      text: 'SELECT id FROM users WHERE email = ?',
       values: [email],
     };
 
-    const result = await this._pool.query(query);
+    const result = await queryMYSQL(query);
 
     if (result.rowCount >= 1) {
       throw new InvariantError('Email sudah digunakan');
@@ -54,39 +55,42 @@ class UsersService {
     const hashedPassword = await bcrypt.hash(password, 12);
 
     const query = {
-      text: 'INSERT INTO users(id, name, email, password, company_id, role) VALUES ($1, $2, $3, $4, $5, $6)',
+      text: 'INSERT INTO users(id, name, email, password, company_id, role) VALUES (?, ?, ?, ?, ?, ?)',
       values: [id, name, email, hashedPassword, companyId, 'kasir'],
     };
 
-    await this._pool.query(query);
+    await queryMYSQL(query);
 
     return id;
   }
 
   async getUsers(companyId, { page = 1, q = null, limit = 10 }) {
-    const recordsQuery = await this._pool.query(`
-      SELECT count(id) as total 
-      FROM users 
-      WHERE 
-        company_id = '${companyId}' 
-        ${q !== null ? `AND name ILIKE '%${q}%'` : ''}
-    `);
+    const recQuery = {
+      text: `
+        SELECT count(id) as total 
+        FROM users 
+        WHERE 
+          company_id = ? 
+          ${q !== null ? `AND name LIKE '%${q}%'` : ''}
+      `,
+      values: [companyId]
+    }
+    const recordsQuery = await queryMYSQL(recQuery);
 
-    const { total } = recordsQuery.rows[0];
-
+    const { total } = recordsQuery[0];
     const totalPages = Math.ceil(total / limit);
     const offsets = limit * (page - 1);
 
     const query = {
       text: `
-        SELECT id, name, email, role FROM users WHERE company_id = $1
-        ${q !== null ? `AND name ILIKE '%${q}%'` : ''}
+        SELECT id, name, email, role FROM users WHERE company_id = ?
+        ${q !== null ? `AND name LIKE '%${q}%'` : ''}
         ORDER BY created_at DESC
-        LIMIT $2 OFFSET $3`,
+        LIMIT ? OFFSET ?`,
       values: [companyId, limit, offsets],
     };
 
-    const { rows } = await this._pool.query(query);
+    const rows  = await queryMYSQL(query);
 
     return {
       users: rows,
@@ -100,19 +104,18 @@ class UsersService {
 
   async getUserById({ userId, companyId }) {
     validateUuid(userId);
-
     const query = {
-      text: 'SELECT id, name, email, role FROM users WHERE id = $1 AND company_id = $2',
+      text: 'SELECT id, name, email, role FROM users WHERE id = ? AND company_id = ?',
       values: [userId, companyId],
     };
 
-    const result = await this._pool.query(query);
+    const result = await queryMYSQL(query);
 
-    if (result.rowCount < 1) {
+    if (result.length < 1) {
       throw new NotFoundError('User tidak ditemukan');
     }
 
-    return result.rows[0];
+    return result[0];
   }
 
   async getMe(userId) {
@@ -126,17 +129,17 @@ class UsersService {
             FROM users 
             LEFT JOIN companies ON companies.id = users.company_id
             LEFT JOIN offices ON companies.id = offices.company_id
-            WHERE users.id = $1`,
+            WHERE users.id = ?`,
       values: [userId],
     };
 
-    const result = await this._pool.query(query);
+    const result = await queryMYSQL(query);
 
-    if (result.rowCount < 1) {
+    if (result.length < 1) {
       throw new NotFoundError('User tidak ditemukan');
     }
 
-    return result.rows[0];
+    return result[0];
   }
 
   async updateUserById(userId, { name, email, password }) {
@@ -146,15 +149,14 @@ class UsersService {
     if (password) {
       hashedPassword = await bcrypt.hash(password, 12);
     }
-    const updatedAt = new Date().toISOString();
+    const updatedAt = new Date();
     const query = {
-      text: `UPDATE users SET name = $1, email = $2, updated_at = $3 ${password ? `, password = '${hashedPassword}'` : ''} WHERE id = $4`,
+      text: `UPDATE users SET name = ?, email = ?, updated_at = ? ${password ? `, password = '${hashedPassword}'` : ''} WHERE id = ?`,
       values: [name, email, updatedAt, userId],
     };
-
-    const result = await this._pool.query(query);
-
-    if (result.rowCount < 1) {
+  
+    const result = await queryMYSQL(query);
+    if (result.length < 1) {
       throw new NotFoundError('User tidak ditemukan');
     }
   }
@@ -163,11 +165,11 @@ class UsersService {
     validateUuid(userId);
 
     const query = {
-      text: 'DELETE FROM users WHERE id = $1',
+      text: 'DELETE FROM users WHERE id = ?',
       values: [userId],
     };
 
-    const result = await this._pool.query(query);
+    const result = await queryMYSQL(query);
 
     if (result.rowCount < 1) {
       throw new NotFoundError('User tidak ditemukan');

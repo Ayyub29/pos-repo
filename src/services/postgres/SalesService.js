@@ -1,8 +1,10 @@
 const { Pool } = require('pg');
+const { db, queryMYSQL } = require('./../../connection/connection')
 const uuid = require('uuid-random');
 const InvariantError = require('../../exceptions/InvariantError');
 const NotFoundError = require('../../exceptions/NotFoundError');
 const { validateUuid } = require('../../utils');
+// const { default: db } = require('node-pg-migrate/dist/db');
 
 class SalesService {
   constructor() {
@@ -13,10 +15,12 @@ class SalesService {
     date, invoice, description, amount, discount, items, userId, officeId, customerId,
   }) {
     // check stock
-    const stocksQuery = await this._pool.query(`
-      SELECT product_id, stock, sale FROM stocks 
-      WHERE product_id IN (${items.map((i) => `'${i.productId}'`).join()})`);
-    const stocks = stocksQuery.rows;
+    const stocksQuery = await queryMYSQL(
+      { text: `SELECT product_id, stock, sale FROM stocks 
+                WHERE product_id IN (${items.map((i) => `'${i.productId}'`).join()})`, 
+        values: []
+    });
+    const stocks = stocksQuery;
     const itemsWithStock = items.map((item) => ({
       ...item,
       stock: stocks.find((sp) => sp.product_id === item.productId).stock,
@@ -28,57 +32,56 @@ class SalesService {
       throw new InvariantError('transaksi gagal: stock tidak cukup');
     }
 
-    const client = await this._pool.connect();
+    // const client = await this._pool.connect();
     try {
-      await client.query('BEGIN'); // transaction
+      await db.beginTransaction(); // transaction
 
-      const id = uuid();
+      const saleId = uuid();
+      
       const saleQuery = {
         text: `INSERT INTO 
                 sales(id, date, invoice, description, amount, discount, created_by, office_id, customer_id)
-              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-        values: [id, date, invoice, description, amount, discount, userId, officeId, customerId],
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+        values: [saleId, date, invoice, description, amount, discount, userId, officeId, customerId],
       };
 
-      const sale = await client.query(saleQuery);
-      const saleId = sale.rows[0].id;
+      const sale = await queryMYSQL(saleQuery);
 
       await itemsWithStock.map(async (item) => {
-        await client.query(`UPDATE stocks SET stock = '${+item.stock - +item.quantity}', sale = '${+item.sale + +item.quantity}' WHERE product_id = '${item.productId}'`);
+        var saleItemId = uuid();
+        await db.query(`UPDATE stocks SET stock = '${+item.stock - +item.quantity}', sale = '${+item.sale + +item.quantity}' WHERE product_id = '${item.productId}'`);
 
         const itemQuery = {
-          text: `INSERT INTO sale_items(sale_id, product_id, quantity, price) VALUES ('${saleId}', '${item.productId}', '${item.quantity}', '${item.price}')`,
+          text: `INSERT INTO sale_items(id, sale_id, product_id, quantity, price) VALUES ('${saleItemId}', '${saleId}', '${item.productId}', '${item.quantity}', '${item.price}')`,
         };
 
-        await client.query(itemQuery);
+        await db.query(itemQuery.text);
       });
 
-      await client.query('COMMIT');
+      await db.commit();
 
       return saleId;
     } catch (error) {
-      await client.query('ROLLBACK');
+      await db.rollback();
       throw new InvariantError(`transaksi gagal: ${error.message}`);
-    } finally {
-      client.release();
     }
   }
 
   async getSales(companyId, {
     startDate, endDate, page = 1, q = null, customerId, limit = 20,
   }) {
-    const recordsQuery = await this._pool.query(`
+    const recordsQuery = await queryMYSQL({text:`
       SELECT count(sales.id) as total 
       FROM sales 
       ${customerId ? 'LEFT JOIN customers ON customers.id = sales.customer_id' : ''}
       WHERE 
-        sales.office_id = (SELECT id FROM offices WHERE company_id = '${companyId}' LIMIT 1)
-      ${q ? `AND invoice ILIKE '%${q}%'` : ''}
+        sales.office_id = (SELECT id FROM offices WHERE company_id = ? LIMIT 1)
+      ${q ? `AND invoice LIKE '%${q}%'` : ''}
       ${customerId ? `AND customer_id = '${customerId}'` : ''}
-      AND date::DATE BETWEEN '${startDate}' AND '${endDate}'
-    `);
+      AND date BETWEEN '${startDate}' AND '${endDate}'
+    `, values:[companyId]});
 
-    const { total } = recordsQuery.rows[0];
+    const { total } = recordsQuery[0];
 
     const totalPages = Math.ceil(total / limit);
     const offsets = limit * (page - 1);
@@ -94,17 +97,17 @@ class SalesService {
             LEFT JOIN users ON users.id = sales.created_by
             LEFT JOIN customers ON customers.id = sales.customer_id
             WHERE 
-              sales.office_id = (SELECT id FROM offices WHERE company_id = $1 LIMIT 1)
-            ${q ? `AND invoice ILIKE '%${q}%'` : ''}
+              sales.office_id = (SELECT id FROM offices WHERE company_id = ? LIMIT 1)
+            ${q ? `AND invoice LIKE '%${q}%'` : ''}
             ${customerId ? `AND customer_id = '${customerId}'` : ''}
-            AND date::DATE BETWEEN $2 AND $3
+            AND date BETWEEN ? AND ?
             ORDER BY sales.created_at DESC
-            LIMIT $4 OFFSET $5
+            LIMIT ? OFFSET ?
             `,
       values: [companyId, startDate, endDate, limit, offsets],
     };
 
-    const { rows } = await this._pool.query(query);
+    const rows = await queryMYSQL(query);
 
     return {
       sales: rows,
@@ -129,13 +132,13 @@ class SalesService {
               LEFT JOIN offices ON offices.id = sales.office_id
               LEFT JOIN users ON users.id = sales.created_by
               LEFT JOIN customers ON customers.id = sales.customer_id
-              WHERE sales.id = $1`,
+              WHERE sales.id = ?`,
       values: [saleId],
     };
 
-    const results = await this._pool.query(query);
+    const results = await queryMYSQL(query);
 
-    if (results.rowCount < 1) {
+    if (results.length < 1) {
       throw new NotFoundError('transaksi tidak ditemukan');
     }
 
@@ -144,15 +147,15 @@ class SalesService {
               products.id, products.code, products.name, quantity, sale_items.price
             FROM sale_items
             LEFT JOIN products ON products.id = sale_items.product_id
-            WHERE sale_id = $1`,
+            WHERE sale_id = ?`,
       values: [saleId],
     };
 
-    const items = await this._pool.query(itemsQuery);
+    const items = await queryMYSQL(itemsQuery);
 
     return {
-      ...results.rows[0],
-      items: items.rows,
+      ...results[0],
+      items: items,
     };
   }
 }

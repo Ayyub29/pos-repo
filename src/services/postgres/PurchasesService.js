@@ -1,5 +1,6 @@
 const { Pool } = require('pg');
 const uuid = require('uuid-random');
+const { db, queryMYSQL } = require('./../../connection/connection')
 const InvariantError = require('../../exceptions/InvariantError');
 const NotFoundError = require('../../exceptions/NotFoundError');
 const { validateUuid } = require('../../utils');
@@ -12,54 +13,52 @@ class PurchasesService {
   async createTransaction({
     date, invoice, description, amount, discount, items, userId, officeId,
   }) {
-    const client = await this._pool.connect();
     try {
-      await client.query('BEGIN'); // transaction
+      await db.beginTransaction(); // transaction
 
-      const id = uuid();
+      const purchaseId = uuid();
       const purchasesQuery = {
         text: `INSERT INTO 
                 purchases(id, date, invoice, description, amount, discount, created_by, office_id)
-              VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-        values: [id, date, invoice, description, amount, discount, userId, officeId],
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        values: [purchaseId, date, invoice, description, amount, discount, userId, officeId],
       };
 
-      const purchase = await client.query(purchasesQuery);
-      const purchaseId = purchase.rows[0].id;
+      await db.query(purchasesQuery.text, purchasesQuery.values);
 
       await items.map(async (item) => {
-        const { rows } = await client.query(`SELECT stock, purchase FROM stocks WHERE product_id = '${item.productId}'`)
-        await client.query(`UPDATE stocks SET stock = '${+rows[0].stock + +item.quantity}', purchase = '${+rows[0].purchase + +item.quantity}' WHERE product_id = '${item.productId}'`);
+        var itemId = uuid()
+        const rows = await queryMYSQL({text:`SELECT stock, purchase FROM stocks WHERE product_id = ?`, values: [item.productId]})
+        console.log(rows)
+        await db.query(`UPDATE stocks SET stock = '${+rows[0].stock + +item.quantity}', purchase = '${+rows[0].purchase + +item.quantity}' WHERE product_id = '${item.productId}'`);
 
         const itemQuery = {
-          text: `INSERT INTO purchase_items(purchase_id, product_id, quantity, cost) VALUES ('${purchaseId}', '${item.productId}', '${item.quantity}', '${item.cost}')`,
+          text: `INSERT INTO purchase_items(id, purchase_id, product_id, quantity, cost) VALUES ('${itemId}','${purchaseId}', '${item.productId}', '${item.quantity}', '${item.cost}')`,
         };
 
-        await client.query(itemQuery);
+        await db.query(itemQuery.text);
       });
 
-      await client.query('COMMIT');
+      await db.commit();
 
       return purchaseId;
     } catch (error) {
-      await client.query('ROLLBACK');
+      await db.rollback();
       throw new InvariantError(`transaksi gagal: ${error.message}`);
-    } finally {
-      client.release();
     }
   }
 
   async getPurchases(companyId, { startDate, endDate, page = 1, q, limit = 20 }) {
-    const recordsQuery = await this._pool.query(`
+    const recordsQuery = await queryMYSQL({text:`
       SELECT count(purchases.id) as total 
       FROM purchases
       WHERE 
-        purchases.office_id = (SELECT id FROM offices WHERE company_id = '${companyId}' LIMIT 1)
-        ${q ? `AND invoice ILIKE '%${q}%'` : ''}
-      AND date::DATE BETWEEN '${startDate}' AND '${endDate}'
-    `);
+        purchases.office_id = (SELECT id FROM offices WHERE company_id = ? LIMIT 1)
+        ${q ? `AND invoice LIKE '%${q}%'` : ''}
+      AND date BETWEEN '${startDate}' AND '${endDate}'
+    `, values:[companyId]});
 
-    const { total } = recordsQuery.rows[0];
+    const { total } = recordsQuery[0];
 
     const totalPages = Math.ceil(total / limit);
     const offsets = limit * (page - 1);
@@ -73,15 +72,15 @@ class PurchasesService {
             LEFT JOIN offices ON offices.id = purchases.office_id
             LEFT JOIN users ON users.id = purchases.created_by
             WHERE 
-              purchases.office_id = (SELECT id FROM offices WHERE company_id = $1 LIMIT 1)
-              ${q ? `AND invoice ILIKE '%${q}%'` : ''}
-            AND date::DATE BETWEEN $2 AND $3
+              purchases.office_id = (SELECT id FROM offices WHERE company_id = ? LIMIT 1)
+              ${q ? `AND invoice LIKE '%${q}%'` : ''}
+            AND date BETWEEN ? AND ?
             ORDER BY purchases.created_at DESC
-            LIMIT $4 OFFSET $5`,
+            LIMIT ? OFFSET ?`,
       values: [companyId, startDate, endDate, limit, offsets],
     };
 
-    const { rows } = await this._pool.query(query);
+    const rows  = await queryMYSQL(query);
 
     return {
       purchases: rows,
@@ -102,14 +101,14 @@ class PurchasesService {
               FROM purchases
               LEFT JOIN offices ON offices.id = purchases.office_id
               LEFT JOIN users ON users.id = purchases.created_by
-              WHERE purchases.id = $1
+              WHERE purchases.id = ?
               ORDER BY purchases.created_at DESC`,
       values: [purchaseId],
     };
 
-    const results = await this._pool.query(query);
+    const results = await queryMYSQL(query);
 
-    if (results.rowCount < 1) {
+    if (results.length < 1) {
       throw new NotFoundError('transaksi tidak ditemukan');
     }
 
@@ -118,15 +117,15 @@ class PurchasesService {
               products.id, products.code, products.name, quantity, purchase_items.cost
             FROM purchase_items
             LEFT JOIN products ON products.id = purchase_items.product_id
-            WHERE purchase_id = $1`,
+            WHERE purchase_id = ?`,
       values: [purchaseId],
     };
 
-    const items = await this._pool.query(itemsQuery);
+    const items = await queryMYSQL(itemsQuery);
 
     return {
-      ...results.rows[0],
-      items: items.rows,
+      ...results[0],
+      items: items,
     };
   }
 }

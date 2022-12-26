@@ -1,6 +1,8 @@
 const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
+const { db } = require('./../../connection/connection')
 const uuid = require('uuid-random');
+const { createuuid } = require('./../../utils')
 const InvariantError = require('../../exceptions/InvariantError');
 
 class RegistrationService {
@@ -16,60 +18,61 @@ class RegistrationService {
     const officeId = uuid();
     const warehouseId = uuid();
     const unitId = uuid();
+    const userid = createuuid();
+    const categoryid = createuuid();
+    const customerid = createuuid();
     const hashedPassword = await bcrypt.hash(password, 12);
 
     const createCompanyQuery = {
-      text: 'INSERT INTO companies(id, name) VALUES ($1, $2)',
+      text: 'INSERT INTO companies(id, name) VALUES (?, ?)',
       values: [companyId, name],
     };
 
     const createOfficeQuery = {
-      text: 'INSERT INTO offices(id, name, company_id) VALUES ($1, $2, $3)',
+      text: 'INSERT INTO offices(id, name, company_id) VALUES (?, ?, ?)',
       values: [officeId, `office-${name}`, companyId],
     };
 
     const createWarehouseQuery = {
-      text: 'INSERT INTO warehouses(id, name, office_id) VALUES ($1, $2, $3)',
+      text: 'INSERT INTO warehouses(id, name, office_id) VALUES (?, ?, ?)',
       values: [warehouseId, `warehouse-${name}`, officeId],
     };
 
     const createUserQuery = {
-      text: 'INSERT INTO users(id, name, email, password, role, company_id) VALUES ((select uuid_generate_v4()), $1, $2, $3, $4, $5)',
-      values: [name, email, hashedPassword, 'admin', companyId],
+      text: 'INSERT INTO users(id, name, email, password, role, company_id) VALUES (?, ?, ?, ?, ?, ?)',
+      values: [userid, name, email, hashedPassword, 'admin', companyId],
     };
 
     const createUnitQuery = {
-      text: 'INSERT INTO units(id, name, company_id) VALUES ($1, $2, $3)',
+      text: 'INSERT INTO units(id, name, company_id) VALUES (?, ?, ?)',
       values: [unitId, 'Buah', companyId],
     };
 
     const createCategoryQuery = {
-      text: 'INSERT INTO categories(id, name, company_id) VALUES ((select uuid_generate_v4()), $1, $2)',
-      values: ['Umum', companyId]
+      text: 'INSERT INTO categories(id, name, company_id) VALUES (?, ?, ?)',
+      values: [categoryid,'Umum', companyId]
     };
 
     const createCustomerQuery = {
-      text: 'INSERT INTO customers(id, name, phone, address, description, company_id) VALUES ((select uuid_generate_v4()), $1, $2, $3, $4, $5)',
-      values: ['Pelanggan Umum', '', '-', '-', companyId]
+      text: 'INSERT INTO customers(id, name, phone, address, description, company_id) VALUES (?, ?, ?, ?, ?, ?)',
+      values: [customerid, 'Pelanggan Umum', '', '-', '-', companyId]
     };
 
-    const client = await this._pool.connect();
+    // const client = await this._pool.connect();
     try {
-      await client.query('BEGIN');
-      await client.query(createCompanyQuery);
-      await client.query(createOfficeQuery);
-      await client.query(createWarehouseQuery);
-      await client.query(createUserQuery);
-      await client.query(createUnitQuery);
-      await client.query(createCategoryQuery);
-      await client.query(createCustomerQuery);
-      await client.query('COMMIT');
+      await db.beginTransaction();
+      await db.query(createCompanyQuery.text, createCompanyQuery.values);
+      await db.query(createOfficeQuery.text, createOfficeQuery.values);
+      await db.query(createWarehouseQuery.text, createWarehouseQuery.values);
+      await db.query(createUserQuery.text, createUserQuery.values);
+      await db.query(createUnitQuery.text, createUnitQuery.values);
+      await db.query(createCategoryQuery.text, createCategoryQuery.values);
+      await db.query(createCustomerQuery.text, createCustomerQuery.values);
+      await db.commit();
     } catch (err) {
-      await client.query('ROLLBACK');
+      await db.rollback();
       throw new InvariantError(`Gagal melakukan registrasi: ${err.message}`);
-    } finally {
-      client.release();
-    }
+    } 
   }
 }
 

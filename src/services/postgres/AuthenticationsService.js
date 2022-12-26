@@ -1,5 +1,7 @@
 const { Pool } = require('pg');
+const { db, queryMYSQL } = require('./../../connection/connection')
 const InvariantError = require('../../exceptions/InvariantError');
+// const { default: db } = require('node-pg-migrate/dist/db');
 
 class AuthenticationsService {
   constructor() {
@@ -8,22 +10,22 @@ class AuthenticationsService {
 
   async addRefreshToken(token) {
     const query = {
-      text: 'INSERT INTO authentications VALUES($1)',
+      text: 'INSERT INTO authentications VALUES(?)',
       values: [token],
     };
 
-    await this._pool.query(query);
+    await db.query(query.text, query.values);
   }
 
   async verifyRefreshToken(token) {
     const query = {
-      text: 'SELECT token FROM authentications WHERE token = $1',
+      text: 'SELECT token FROM authentications WHERE token = ?',
       values: [token],
     };
 
-    const result = await this._pool.query(query);
+    const result = await queryMYSQL(query);
 
-    if (!result.rows.length) {
+    if (!result.length) {
       throw new InvariantError('Refresh token tidak valid');
     }
   }
@@ -32,10 +34,10 @@ class AuthenticationsService {
     await this.verifyRefreshToken(token);
 
     const query = {
-      text: 'DELETE FROM authentications WHERE token = $1',
+      text: 'DELETE FROM authentications WHERE token = ?',
       values: [token],
     };
-    await this._pool.query(query);
+    await db.query(query.text, query.values);
   }
 }
 

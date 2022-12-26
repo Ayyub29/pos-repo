@@ -1,6 +1,7 @@
 const { Pool } = require('pg');
 const uuid = require('uuid-random');
 const NotFoundError = require('../../exceptions/NotFoundError');
+const { db, queryMYSQL } = require('./../../connection/connection')
 const { validateUuid } = require('../../utils');
 
 class CategoriesService {
@@ -9,15 +10,18 @@ class CategoriesService {
   }
 
   async getCategories(companyId, { page = 1, limit = 10, q = null }) {
-    const recordsQuery = await this._pool.query(`
-      SELECT count(id) as total 
-      FROM categories 
-      WHERE 
-        company_id = '${companyId}' 
-        ${q !== null ? `AND name ILIKE '%${q}%'` : ''}
-    `);
-
-    const { total } = recordsQuery.rows[0];
+    var recQuery = {
+      text: `
+          SELECT count(id) as total 
+          FROM categories 
+          WHERE 
+            company_id = ?
+            ${q !== null ? `AND name LIKE '%${q}%'` : ''}
+        `,
+      values: [companyId]
+    }
+    const recordsQuery = await queryMYSQL(recQuery);
+    const { total } = recordsQuery[0];
 
     const totalPages = Math.ceil(total / limit);
     const offsets = limit * (page - 1);
@@ -26,14 +30,14 @@ class CategoriesService {
       text: `
         SELECT id, name, description 
         FROM categories 
-        WHERE company_id = $1
-        ${q !== null ? `AND name ILIKE '%${q}%'` : ''}
+        WHERE company_id = ?
+        ${q !== null ? `AND name LIKE '%${q}%'` : ''}
         ORDER BY created_at DESC
-        LIMIT $2 OFFSET $3`,
+        LIMIT ? OFFSET ?`,
       values: [companyId, limit, offsets],
     };
 
-    const { rows } = await this._pool.query(query);
+    const rows  = await queryMYSQL(query);
 
     return {
       categories: rows,
@@ -49,27 +53,27 @@ class CategoriesService {
     validateUuid(categoryId);
 
     const query = {
-      text: 'SELECT name, description FROM categories WHERE id = $1',
+      text: 'SELECT name, description FROM categories WHERE id = ?',
       values: [categoryId],
     };
 
-    const results = await this._pool.query(query);
+    const results = await queryMYSQL(query);
 
-    if (results.rowCount < 1) {
+    if (results.length < 1) {
       throw new NotFoundError('Category tidak ditemukan');
     }
 
-    return results.rows[0];
+    return results[0];
   }
 
   async addCategory({ name, description, companyId }) {
     const id = uuid();
     const query = {
-      text: 'INSERT INTO categories(id, name, description, company_id) VALUES ($1, $2, $3, $4)',
+      text: 'INSERT INTO categories(id, name, description, company_id) VALUES (?, ?, ?, ?)',
       values: [id, name, description, companyId],
     };
 
-    await this._pool.query(query);
+    await db.query(query.text, query.values);
 
     return id;
   }
@@ -78,22 +82,22 @@ class CategoriesService {
     validateUuid(categoryId);
 
     const query = {
-      text: 'UPDATE categories SET name = $1, description = $2 WHERE id = $3',
+      text: 'UPDATE categories SET name = ?, description = ? WHERE id = ?',
       values: [name, description, categoryId],
     };
 
-    await this._pool.query(query);
+    await db.query(query.text, query.values);
   }
 
   async deleteCategoryById(categoryId) {
     validateUuid(categoryId);
 
     const query = {
-      text: 'DELETE FROM categories WHERE id = $1',
+      text: 'DELETE FROM categories WHERE id = ?',
       values: [categoryId],
     };
 
-    await this._pool.query(query);
+    await db.query(query.text, query.values);
   }
 }
 

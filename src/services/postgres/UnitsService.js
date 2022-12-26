@@ -1,4 +1,5 @@
 const { Pool } = require('pg');
+const { db, queryMYSQL } = require('./../../connection/connection')
 const uuid = require('uuid-random');
 const NotFoundError = require('../../exceptions/NotFoundError');
 const { validateUuid } = require('../../utils');
@@ -9,30 +10,33 @@ class UnitsService {
   }
 
   async getUnits(companyId, { page = 1, q = null, limit = 10 }) {
-    const recordsQuery = await this._pool.query(`
-      SELECT count(id) as total 
-      FROM units 
-      WHERE 
-        company_id = '${companyId}' 
-        ${q !== null ? `AND name ILIKE '%${q}%'` : ''}
-    `);
-
-    const { total } = recordsQuery.rows[0];
+    var recQuery = {
+      text: `
+        SELECT count(id) as total 
+        FROM units 
+        WHERE 
+          company_id = ?
+          ${q !== null ? `AND name LIKE '%${q}%'` : ''}
+      `,
+      values: [companyId]
+    }
+    const recordsQuery = await queryMYSQL(recQuery);
+    const { total } = recordsQuery[0];
 
     const totalPages = Math.ceil(total / limit);
     const offsets = limit * (page - 1);
 
     const query = {
       text: `
-        SELECT id, name, description FROM units WHERE company_id = $1
-        ${q !== null ? `AND name ILIKE '%${q}%'` : ''}
-        ORDER BY created_at DESC
-        LIMIT $2 OFFSET $3
+          SELECT id, name, description FROM units WHERE company_id = ?
+          ${q !== null ? `AND name LIKE '%${q}%'` : ''}
+          ORDER BY created_at DESC
+          LIMIT ? OFFSET ?
         `,
       values: [companyId, limit, offsets],
     };
 
-    const { rows } = await this._pool.query(query);
+    const rows  = await queryMYSQL(query);
 
     return {
       units: rows,
@@ -48,27 +52,27 @@ class UnitsService {
     validateUuid(unitId);
 
     const query = {
-      text: 'SELECT name, description FROM units WHERE id = $1',
+      text: 'SELECT name, description FROM units WHERE id = ?',
       values: [unitId],
     };
 
-    const results = await this._pool.query(query);
+    const results = await queryMYSQL(query);
 
-    if (results.rowCount < 1) {
+    if (results.length < 1) {
       throw new NotFoundError('Unit tidak ditemukan');
     }
 
-    return results.rows[0];
+    return results[0];
   }
 
   async addUnit({ name, description, companyId }) {
     const id = uuid();
     const query = {
-      text: 'INSERT INTO units(id, name, description, company_id) VALUES ($1, $2, $3, $4)',
+      text: 'INSERT INTO units(id, name, description, company_id) VALUES (?, ?, ?, ?)',
       values: [id, name, description, companyId],
     };
 
-    await this._pool.query(query);
+    await db.query(query.text, query.values);
 
     return id;
   }
@@ -77,22 +81,22 @@ class UnitsService {
     validateUuid(unitId);
 
     const query = {
-      text: 'UPDATE units SET name = $1, description = $2 WHERE id = $3',
+      text: 'UPDATE units SET name = ?, description = ? WHERE id = ?',
       values: [name, description, unitId],
     };
 
-    await this._pool.query(query);
+    await db.query(query.text, query.values);
   }
 
   async deleteUnitById(unitId) {
     validateUuid(unitId);
 
     const query = {
-      text: 'DELETE FROM units WHERE id = $1',
+      text: 'DELETE FROM units WHERE id = ?',
       values: [unitId],
     };
 
-    await this._pool.query(query);
+    await db.query(query.text, query.values);
   }
 }
 

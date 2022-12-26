@@ -1,5 +1,6 @@
 const { Pool } = require('pg');
 const uuid = require('uuid-random');
+const { db, queryMYSQL } = require('./../../connection/connection')
 const { validateUuid } = require('../../utils');
 const NotFoundError = require('../../exceptions/NotFoundError');
 const InvariantError = require('../../exceptions/InvariantError');
@@ -12,15 +13,19 @@ class ProductsService {
   async getProducts(companyId, {
     page = 1, q = null, withStock = false, withCategory = false, categoryId, limit = 10,
   }) {
-    const recordsQuery = await this._pool.query(`
-      SELECT count(id) as total 
-      FROM products 
-      WHERE 
-        company_id = '${companyId}' 
-        ${q ? `AND (name ILIKE '%${q}%' OR code ILIKE '%${q}%')` : ''}
-    `);
+    var recQuery = {
+      text: `
+          SELECT count(id) as total 
+          FROM products 
+          WHERE 
+            company_id = ?
+            ${q ? `AND (name LIKE '%${q}%' OR code LIKE '%${q}%')` : ''}
+        `,
+      values: [companyId]
+    }
+    const recordsQuery = await queryMYSQL(recQuery);
 
-    const { total } = recordsQuery.rows[0];
+    const { total } = recordsQuery[0];
 
     const totalPages = Math.ceil(total / limit);
     const offsets = limit * (page - 1);
@@ -33,15 +38,15 @@ class ProductsService {
             FROM products
             ${withStock === 'true' ? 'LEFT JOIN stocks ON stocks.product_id = products.id' : ''}
             ${withCategory === 'true' ? 'LEFT JOIN categories ON categories.id = products.category_id' : ''}
-            WHERE products.company_id = $1
+            WHERE products.company_id = ?
             ${categoryId ? `AND categories.id = '${categoryId}'` : ''}
-            ${q ? `AND (products.name ILIKE '%${q}%' OR products.code ILIKE '%${q}%')` : ''}
+            ${q ? `AND (products.name LIKE '%${q}%' OR products.code LIKE '%${q}%')` : ''}
             ORDER BY products.created_at DESC
-            LIMIT $2 OFFSET $3`,
+            LIMIT ? OFFSET ?`,
       values: [companyId, limit, offsets],
     };
 
-    const { rows } = await this._pool.query(query);
+    const rows = await queryMYSQL(query);
 
     return {
       products: rows,
@@ -65,17 +70,17 @@ class ProductsService {
             FROM products
             LEFT JOIN stocks ON stocks.product_id = products.id
             LEFT JOIN categories ON categories.id = products.category_id
-            WHERE products.id = $1 AND products.company_id = $2`,
+            WHERE products.id = ? AND products.company_id = ?`,
       values: [productId, companyId],
     };
 
-    const result = await this._pool.query(query);
+    const result = await queryMYSQL(query);
 
-    if (result.rowCount < 1) {
+    if (result.length < 1) {
       throw new NotFoundError('Product tidak ditemukan');
     }
 
-    return result.rows[0];
+    return result[0];
   }
 
   async addProduct({
@@ -83,12 +88,26 @@ class ProductsService {
   }) {
     const productId = uuid();
     const stockId = uuid();
+    const unitQuery = {
+      text: `SELECT id as unitId FROM units WHERE company_id = ? LIMIT 1`,
+      values: [companyId]
+    }
+    const officeQuery = {
+      text: ` SELECT id as warehouseId FROM warehouses WHERE office_id = 
+                (SELECT id FROM offices WHERE company_id = ? LIMIT 1) 
+              LIMIT 1`,
+      values: [companyId]
+    }
+    var  unitRows  = await queryMYSQL(unitQuery)
+    var { unitId } = unitRows[0]
+    var warehouseRows = await queryMYSQL(officeQuery)
+    var { warehouseId } = warehouseRows[0]
 
     const productQuery = {
       text: `INSERT INTO products(id, code, name, description, price, cost, category_id, company_id, unit_id)
             VALUES
-            ($1, $2, $3, $4, $5, $6, $7, $8, (SELECT id FROM units WHERE company_id = $8 LIMIT 1))`,
-      values: [productId, code, name, description, price, cost, categoryId, companyId],
+            (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      values: [productId, code, name, description, price, cost, categoryId, companyId, unitId],
     };
 
     // update stock default warehouse default office
@@ -96,27 +115,21 @@ class ProductsService {
       text: `INSERT INTO 
               stocks(id, product_id, stock, warehouse_id, sale, purchase)
             VALUES 
-              ($1, $2, $3, (
-                SELECT id FROM warehouses WHERE office_id = 
-                  (SELECT id FROM offices WHERE company_id = $4 LIMIT 1) 
-                LIMIT 1),
-              0, 0)`,
-      values: [stockId, productId, stock, companyId],
+              (?, ?, ?, ?, 0, 0)`,
+      values: [stockId, productId, stock, warehouseId],
     };
 
-    const client = await this._pool.connect();
+    // const client = await this._pool.connect();
 
     try {
-      await client.query('BEGIN');
-      await client.query(productQuery);
-      await client.query(stockQuery);
-      await client.query('COMMIT');
+      await db.beginTransaction();
+      await db.query(productQuery.text, productQuery.values);
+      await db.query(stockQuery.text, stockQuery.values);
+      await db.commit();
     } catch (err) {
-      await client.query('ROLLBACK');
+      await db.rollback();
       throw new InvariantError(`Product gagal ditambahkan: ${err.message}`);
-    } finally {
-      client.release();
-    }
+    } 
 
     return productId;
   }
@@ -128,25 +141,25 @@ class ProductsService {
 
     const productQuery = {
       text: `UPDATE products SET 
-              code = $1, name = $2, description = $3, price = $4, 
-              cost = $5, category_id = $6
-            WHERE id = $7`,
+              code = ?, name = ?, description = ?, price = ?, 
+              cost = ?, category_id = ?
+            WHERE id = ?`,
       values: [code, name, description, price, cost, categoryId, productId],
     };
 
     // update stock all warehouses
     const stockQuery = {
-      text: 'UPDATE stocks SET stock = $1 WHERE product_id = $2',
+      text: 'UPDATE stocks SET stock = ? WHERE product_id = ?',
       values: [stock, productId],
     };
 
     try {
-      await this._pool.query('BEGIN');
-      await this._pool.query(productQuery);
-      await this._pool.query(stockQuery);
-      await this._pool.query('COMMIT');
+      await db.beginTransaction();
+      await db.query(productQuery.text, productQuery.values);
+      await db.query(stockQuery.text, stockQuery.values);
+      await db.commit();
     } catch (err) {
-      await this._pool.query('ROLLBACK');
+      await db.rollback();
       throw new InvariantError('Product gagal diubah');
     }
   }
@@ -154,13 +167,13 @@ class ProductsService {
   async deleteProductById(productId) {
     validateUuid(productId);
     const query = {
-      text: 'DELETE FROM products WHERE id = $1',
+      text: 'DELETE FROM products WHERE id = ?',
       values: [productId],
     };
 
-    const result = await this._pool.query(query);
+    const result = await queryMYSQL(query);
 
-    if (result.rowCount < 1) {
+    if (result.length < 1) {
       throw new NotFoundError('Product tidak ditemukan');
     }
   }

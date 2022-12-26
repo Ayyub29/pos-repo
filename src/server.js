@@ -103,33 +103,6 @@ const init = async () => {
     }),
   });
 
-  // route
-  server.route([
-    {
-      method: 'GET',
-      path: '/',
-      handler: () => ({
-        data: {
-          status: 'Ok!',
-          name: 'kasirAja Api',
-          version: '1.0.0',
-        },
-      }),
-    },
-    {
-      method: '*',
-      path: '/{p*}', // catch-all path
-      handler: (request, h) => {
-        const response = h.response({
-          status: '404',
-          message: 'Not Found',
-        });
-        response.code(404);
-        return response;
-      },
-    },
-  ]);
-
   // catch error response
   server.ext('onPreResponse', (request, h) => {
     const { response } = request;
@@ -219,6 +192,32 @@ const init = async () => {
       plugin: general,
       options: {
         service: generalService,
+      },
+    },
+  ]);
+
+  server.route([
+    {
+      method: 'GET',
+      path: '/',
+      handler: () => ({
+        data: {
+          status: 'Ok!',
+          name: 'kasirAja Api',
+          version: '1.0.0',
+        },
+      }),
+    },
+    {
+      method: '*',
+      path: '/{p*}', // catch-all path
+      handler: (request, h) => {
+        const response = h.response({
+          status: '404',
+          message: ' Your URL Not Found',
+        });
+        response.code(404);
+        return response;
       },
     },
   ]);

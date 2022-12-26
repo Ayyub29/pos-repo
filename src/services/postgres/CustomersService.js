@@ -1,4 +1,5 @@
 const { Pool } = require('pg');
+const { db, queryMYSQL } = require('./../../connection/connection')
 const uuid = require('uuid-random');
 const NotFoundError = require('../../exceptions/NotFoundError');
 const { validateUuid } = require('../../utils');
@@ -9,15 +10,18 @@ class CustomersService {
   }
 
   async getCustomers(companyId, { page = 1, limit = 10, q = null }) {
-    const recordsQuery = await this._pool.query(`
-      SELECT count(id) as total 
-      FROM customers 
-      WHERE 
-        company_id = '${companyId}' 
-        ${q ? `AND (name ILIKE '%${q}%' OR phone ILIKE '%${q}%')` : ''}
-    `);
-
-    const { total } = recordsQuery.rows[0];
+    var recQuery = {
+      text: `
+        SELECT count(id) as total 
+        FROM customers 
+        WHERE 
+          company_id = ? 
+          ${q ? `AND (name LIKE '%${q}%' OR phone LIKE '%${q}%')` : ''}
+      `, 
+      values: [companyId]
+    }
+    const recordsQuery = await queryMYSQL(recQuery);
+    const { total } = recordsQuery[0];
 
     const totalPages = Math.ceil(total / limit);
     const offsets = limit * (page - 1);
@@ -26,14 +30,14 @@ class CustomersService {
       text: `
         SELECT id, name, phone, description 
         FROM customers 
-        WHERE company_id = $1
-        ${q ? `AND (name ILIKE '%${q}%' OR phone ILIKE '%${q}%')` : ''}
+        WHERE company_id = ?
+        ${q ? `AND (name LIKE '%${q}%' OR phone LIKE '%${q}%')` : ''}
         ORDER BY created_at DESC
-        LIMIT $2 OFFSET $3`,
+        LIMIT ? OFFSET ?`,
       values: [companyId, limit, offsets],
     };
 
-    const { rows } = await this._pool.query(query);
+    const rows  = await queryMYSQL(query);
 
     return {
       customers: rows,
@@ -49,17 +53,17 @@ class CustomersService {
     validateUuid(customerId);
 
     const query = {
-      text: 'SELECT name, phone, address, description FROM customers WHERE id = $1',
+      text: 'SELECT name, phone, address, description FROM customers WHERE id = ?',
       values: [customerId],
     };
 
-    const results = await this._pool.query(query);
+    const results = await queryMYSQL(query);
 
-    if (results.rowCount < 1) {
+    if (results.length < 1) {
       throw new NotFoundError('Customer tidak ditemukan');
     }
 
-    return results.rows[0];
+    return results[0];
   }
 
   async addCustomer({
@@ -67,11 +71,11 @@ class CustomersService {
   }) {
     const id = uuid();
     const query = {
-      text: 'INSERT INTO customers(id, name, phone, address, description, company_id) VALUES ($1, $2, $3, $4, $5, $6)',
+      text: 'INSERT INTO customers(id, name, phone, address, description, company_id) VALUES (?, ?, ?, ?, ?, ?)',
       values: [id, name, phone, address, description, companyId],
     };
 
-    await this._pool.query(query);
+    await db.query(query.text, query.values);
 
     return id;
   }
@@ -82,22 +86,22 @@ class CustomersService {
     validateUuid(customerId);
 
     const query = {
-      text: 'UPDATE customers SET name = $1, phone = $2, address = $3, description = $4 WHERE id = $5',
+      text: 'UPDATE customers SET name = ?, phone = ?, address = ?, description = ? WHERE id = ?',
       values: [name, phone, address, description, customerId],
     };
 
-    await this._pool.query(query);
+    await db.query(query.text, query.values);
   }
 
   async deleteCustomerById(customerId) {
     validateUuid(customerId);
 
     const query = {
-      text: 'DELETE FROM customers WHERE id = $1',
+      text: 'DELETE FROM customers WHERE id = ?',
       values: [customerId],
     };
 
-    await this._pool.query(query);
+    await db.query(query.text, query.values);
   }
 }
 
