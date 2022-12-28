@@ -4,6 +4,7 @@ const { db } = require('./../../connection/connection')
 const uuid = require('uuid-random');
 const { createuuid } = require('./../../utils')
 const InvariantError = require('../../exceptions/InvariantError');
+const { format } = require('mysql');
 
 class RegistrationService {
   constructor(userService) {
@@ -60,7 +61,6 @@ class RegistrationService {
 
     // const client = await this._pool.connect();
     try {
-      await db.beginTransaction();
       await db.query(createCompanyQuery.text, createCompanyQuery.values);
       await db.query(createOfficeQuery.text, createOfficeQuery.values);
       await db.query(createWarehouseQuery.text, createWarehouseQuery.values);
@@ -68,9 +68,8 @@ class RegistrationService {
       await db.query(createUnitQuery.text, createUnitQuery.values);
       await db.query(createCategoryQuery.text, createCategoryQuery.values);
       await db.query(createCustomerQuery.text, createCustomerQuery.values);
-      await db.commit();
+      // await db.commit();
     } catch (err) {
-      await db.rollback();
       throw new InvariantError(`Gagal melakukan registrasi: ${err.message}`);
     } 
   }

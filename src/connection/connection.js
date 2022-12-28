@@ -1,16 +1,16 @@
 var mysql = require('mysql');
 
-var db = mysql.createConnection({
-    host: "127.0.0.1",
-    user: "root",
-    password: "12345678",
-    database: "test"
+var db = mysql.createPool({
+    host: "109.106.252.121",
+    user: "u1578470_dev",
+    password: "semangat45",
+    database: "u1578470_kasiraja"
 });
 
-db.connect(function(err) {
-    if (err) throw err;
-    console.log("Connected!");
-});
+// db.connect(function(err) {
+//     if (err) throw err;
+//     console.log("Connected!");
+// });
 
 const queryMYSQL = async (query) => {
     return new Promise((resolve, reject) => {

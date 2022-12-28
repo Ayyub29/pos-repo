@@ -88,9 +88,6 @@ const init = async () => {
     {
       plugin: Jwt,
     },
-    {
-      plugin: require('hapi-cors'),
-    }
   ]);
 
   // jwt
