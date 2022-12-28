@@ -2,7 +2,6 @@ const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
 const { db } = require('./../../connection/connection')
 const uuid = require('uuid-random');
-const { createuuid } = require('./../../utils')
 const InvariantError = require('../../exceptions/InvariantError');
 const { format } = require('mysql');
 
@@ -19,9 +18,9 @@ class RegistrationService {
     const officeId = uuid();
     const warehouseId = uuid();
     const unitId = uuid();
-    const userid = createuuid();
-    const categoryid = createuuid();
-    const customerid = createuuid();
+    const userid = uuid();
+    const categoryid = uuid();
+    const customerid = uuid();
     const hashedPassword = await bcrypt.hash(password, 12);
 
     const createCompanyQuery = {
