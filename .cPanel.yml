@@ -2,5 +2,5 @@
 deployment:
   tasks:
     - export DEPLOYPATH=/home/u1578470/public_html/kasir2
-    - /bin cp /src/* $DEPLOYPATH
+    - /bin/cp -r src $DEPLOYPATH
     - /bin/cp package.json $DEPLOYPATH
