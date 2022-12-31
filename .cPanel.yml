@@ -1,6 +1,7 @@
 ---
 deployment:
   tasks:
-    - export DEPLOYPATH=/home/u1578470/public_html/kasir2
+    - export DEPLOYPATH=/home/u1578470/public_html/kasir-api.belajarqa.com
     - /bin/cp -r src $DEPLOYPATH
     - /bin/cp package.json $DEPLOYPATH
+    - /bin/cp .cPanel.yml $DEPLOYPATH
