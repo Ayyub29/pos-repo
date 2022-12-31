@@ -1,0 +1,6 @@
+---
+deployment:
+  tasks:
+    - export DEPLOYPATH=/home/u1578470/public_html/kasir2
+    - /src -R images $DEPLOYPATH
+    - / package.json $DEPLOYPATH
